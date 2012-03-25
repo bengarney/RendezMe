@@ -3,20 +3,6 @@ using System.Collections.Generic;
 using Extensions;
 using UnityEngine;
 
-public class VesselDistanceComparer : IComparer<Vessel>
-{
-    public Vessel OriginVessel;
-
-    public int Compare(Vessel a, Vessel b)
-    {
-        float aDist = Vector3.Distance(a.transform.position, OriginVessel.transform.position);
-        float bDist = Vector3.Distance(b.transform.position, OriginVessel.transform.position);
-
-        return aDist.CompareTo(bDist);
-    }
-    
-}
-
 public class RendezMe : Part
 {
     #region UI State
@@ -107,7 +93,6 @@ public class RendezMe : Part
     private Vector3 _localRelativePosition = Vector3.zero;
 
     #endregion
-
 
     #region FlyByWire PID Controller State
     public enum Orient
@@ -497,10 +482,7 @@ public class RendezMe : Part
     {
         //does Vessels[selVessel] contain a vessel?
         if (FlightGlobals.Vessels.Count - 1 < _selectedVesselIndex)
-        {
-            //no go back to vessel menu
             return false;
-        }
         
         // Does the ID match the vessel selected?
         int id = FlightGlobals.Vessels[_selectedVesselIndex].GetInstanceID();
