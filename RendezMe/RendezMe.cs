@@ -256,9 +256,7 @@ public class RendezMe : Part
             RenderSelectedUI(sty);
 
         if (Mode == UIMode.ALIGN)
-        {
             RenderAlignUI(sty);
-        }
 
         // TODO: RELATIVE INCLINATION
         // TIME TO NODES
@@ -268,14 +266,10 @@ public class RendezMe : Part
         // AUTOPILOT(NORMAL/ANTINORMAL)
 
         if (Mode == UIMode.SYNC)
-        {
             RenderSyncUI(sty);
-        }
 
         if (Mode == UIMode.RENDEZVOUS)
-        {
             RenderRendezvousUI(sty);
-        }
 
         //DragWindow makes the window draggable. The Rect specifies which part of the window it can by dragged by, and is 
         //clipped to the actual boundary of the window. You can also pass no argument at all and then the window can by
@@ -511,7 +505,7 @@ public class RendezMe : Part
         //TODO: ADD BODY SUPPORT
         //create a button for each vessel, and store the location of the selected vessel
 
-        _scrollPosition = GUILayout.BeginScrollView(_scrollPosition, GUILayout.Width(200), GUILayout.Height(300));
+        _scrollPosition = GUILayout.BeginScrollView(_scrollPosition, GUILayout.Width(300), GUILayout.Height(300));
 
         // Generate and sort an array of vessels by distance.
         List<Vessel> vesselList = new List<Vessel>(FlightGlobals.Vessels);
