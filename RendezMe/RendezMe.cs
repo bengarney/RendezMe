@@ -99,7 +99,6 @@ public class RendezMe : Part
     private float _relativeInclination;
     private Vector3 _vectorToTarget;
     private float _targetDistance;
-    private float _prevTargetDistance;
 
     private bool _killRelativeVelocity = false;
     private Vector3 _localRelativeVelocity = Vector3.zero;
@@ -389,19 +388,16 @@ public class RendezMe : Part
 
         // Take the relative velocity and project into ship local space.
         _localRelativeVelocity = vessel.transform.worldToLocalMatrix.MultiplyVector(_relativeVelocity);
-        var localTargetPos = vessel.transform.worldToLocalMatrix.MultiplyPoint(selectedVessel.transform.position);
+        _localRelativePosition = vessel.transform.worldToLocalMatrix.MultiplyPoint(selectedVessel.transform.position);
 
-        if(GUILayout.RepeatButton(_killRelativeVelocity == false ? "Kill Rel Vel" : "FIRING", sty, GUILayout.ExpandWidth(true)))
-        {
-            Debug.DrawLine(vessel.transform.position, selectedVessel.transform.position, Color.green, 0.2f);
-            _killRelativeVelocity = true;
-        }
+        if(GUILayout.Button(_killRelativeVelocity == false ? "Kill Rel Vel" : "FIRING", sty, GUILayout.ExpandWidth(true)))
+            _killRelativeVelocity = !_killRelativeVelocity;
 
-        if(_killRelativeVelocity)
-            GUILayout.Box("Firing!");
+        if (GUILayout.Button(_homeOnRelativePosition == false ? "Home on Y+ 5m" : "HOMING", sty, GUILayout.ExpandWidth(true)))
+            _homeOnRelativePosition = !_homeOnRelativePosition;
 
         GUILayout.Box("Rel Vel : " + _localRelativeVelocity.x.ToString("F2") + ", " + _localRelativeVelocity.y.ToString("F2") + ", " + _localRelativeVelocity.z.ToString("F2"));
-        GUILayout.Box("Rel Pos : " + localTargetPos.x.ToString("F2") + ", " + localTargetPos.y.ToString("F2") + ", " + localTargetPos.z.ToString("F2"));
+        GUILayout.Box("Rel Pos : " + _localRelativePosition.x.ToString("F2") + ", " + _localRelativePosition.y.ToString("F2") + ", " + _localRelativePosition.z.ToString("F2"));
 
         if (_flyByWire == false)
         {
@@ -541,7 +537,6 @@ public class RendezMe : Part
         _relativeVelocityMagnitude = (float) _relativeVelocity.magnitude;
         _vectorToTarget = selectedVessel.transform.position - vessel.transform.position;
         _targetDistance = Vector3.Distance(selectedVessel.transform.position, vessel.transform.position);
-        _prevTargetDistance = _targetDistance;
 
         _relativeInclination = Mathf.Abs((float) selectedVessel.orbit.inclination - (float) vessel.orbit.inclination);
 
@@ -573,11 +568,11 @@ public class RendezMe : Part
                 break;
             case Orient.MatchTarget:
                 _tgtFwd = selectedVessel.transform.up;
-                _tgtUp = selectedVessel.transform.forward;
+                _tgtUp = selectedVessel.transform.right;
                 break;
             case Orient.MatchTargetAway:
                 _tgtFwd = -selectedVessel.transform.up;
-                _tgtUp = selectedVessel.transform.forward;
+                _tgtUp = selectedVessel.transform.right;
                 break;
         }
     }
@@ -585,6 +580,8 @@ public class RendezMe : Part
 
     private void DriveShip(FlightCtrlState s)
     {
+        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
+
         if(_killRelativeVelocity)
         {
             s.X = Mathf.Clamp(-_localRelativeVelocity.x * 8.0f, -1.0f, 1.0f);
@@ -593,7 +590,45 @@ public class RendezMe : Part
 
             if (_localRelativeVelocity.magnitude < 0.1)
                 _killRelativeVelocity = false;
+        } 
+        else if (_homeOnRelativePosition)
+        {
+            Vector3 targetGoalPos = new Vector3(0.0f, 2.0f, 0.0f);
+            targetGoalPos = selectedVessel.transform.localToWorldMatrix.MultiplyPoint(targetGoalPos);
+            targetGoalPos = vessel.transform.worldToLocalMatrix.MultiplyPoint(targetGoalPos);
+
+            Vector3 relPos = targetGoalPos;
+            Vector4 goalVel = Vector3.zero;
+
+            if (relPos.x < 0.1f && _localRelativeVelocity.x < 0.5f)
+                goalVel.x = 1;
+
+            if (relPos.x > -0.1f && _localRelativeVelocity.x > -0.5f)
+                goalVel.x = -1;
+
+            if (relPos.y < 0.1f && _localRelativeVelocity.y < 0.5f)
+                goalVel.y = 1;
+
+            if (relPos.y > -0.1f && _localRelativeVelocity.y > -0.5f)
+                goalVel.y = -1;
+
+            if (relPos.z < 0.1f && _localRelativeVelocity.z < 0.5f)
+                goalVel.z = 1;
+
+            if (relPos.z > -0.1f && _localRelativeVelocity.z > -0.5f)
+                goalVel.z = -1;
+
+            s.X = goalVel.x;
+            s.Y = goalVel.z;
+            s.Z = goalVel.y;
+
+            if (relPos.magnitude < 0.2)
+            {
+                _homeOnRelativePosition = false;
+                _killRelativeVelocity = true;
+            }
         }
+
 
         if (!_flyByWire) 
             return;
