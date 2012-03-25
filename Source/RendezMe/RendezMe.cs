@@ -614,6 +614,71 @@ public class RendezMe : Part
         }
     }
 
+    private void CalculateNearestRendezvousInSeconds(out double timeToRendezvous, out double minDeltaTime)
+    {
+        // Build up the times for apses for the next 4 orbis for the target.
+        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
+
+        // Find the next few times of apsis for the target and the ship.
+        double targetApoapsisAnomaly = selectedVessel.orbit.TranslateAnomaly(vessel.orbit, 180);
+        double targetPeriapsisAnomaly = selectedVessel.orbit.TranslateAnomaly(vessel.orbit, 0);
+
+        double[] targetApses = new double[8];
+        double[] shipApses = new double[8];
+        for (int i = 0; i < 4; i++)
+        {
+            targetApses[i * 2 + 0] = selectedVessel.orbit.GetTimeToTrue(0) + i * selectedVessel.orbit.period;
+            targetApses[i * 2 + 1] = selectedVessel.orbit.GetTimeToTrue(0) + i * selectedVessel.orbit.period;
+            shipApses[i * 2 + 0] = vessel.orbit.GetTimeToTrue(targetApoapsisAnomaly) + i * vessel.orbit.period;
+            shipApses[i * 2 + 1] = vessel.orbit.GetTimeToTrue(targetPeriapsisAnomaly) + i * vessel.orbit.period;
+        }
+
+        // Walk the lists and find the nearest times. This could be optimized
+        // but it doesn't matter.
+
+        double closestPeriDeltaT = double.MaxValue;
+        int closestPeriIndex = -1;
+
+        double closestApoDeltaT = double.MaxValue;
+        int closestApoIndex = -1;
+
+        for(int i=0; i<4; i++)
+        {
+            double shipApoT = shipApses[i*2+0];
+            double shipPeriT = shipApses[i*2+1];
+
+            for(int j=0; j<4; j++)
+            {
+                double targApoT = targetApses[j * 2 + 0];
+                double deltaApo = Math.Abs(shipApoT - targApoT);
+                if(deltaApo < closestApoDeltaT)
+                {
+                    closestApoDeltaT = deltaApo;
+                    closestApoIndex = j * 2 + 0;
+                }
+
+                double targPeriT = targetApses[j * 2 + 1];
+                double deltaPeri = Math.Abs(shipPeriT - targPeriT);
+                if (deltaPeri < closestPeriDeltaT)
+                {
+                    closestPeriDeltaT = deltaPeri;
+                    closestPeriIndex = j * 2 + 1;
+                }
+            }
+        }
+
+        if(closestApoDeltaT < closestPeriDeltaT)
+        {
+            timeToRendezvous = shipApses[closestApoIndex];
+            minDeltaTime = closestApoDeltaT;            
+        }
+        else
+        {
+            timeToRendezvous = shipApses[closestPeriIndex];
+            minDeltaTime = closestPeriDeltaT;
+        }
+    }
+
     private double CalculateTimeTillNextTargetApsis()
     {
         Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
@@ -743,10 +808,7 @@ public class RendezMe : Part
 
                     // Set the PointAt based on who is faster at that point in time.
                     _flyByWire = true;
-                    if (vessel.orbit.getOrbitalVelocityAt(timeLeft) > selectedVessel.orbit.getOrbitalVelocityAt(timeLeft))
-                        PointAt = Orient.Retrograde;
-                    else
-                        PointAt = Orient.Prograde;
+                    PointAt = Orient.Prograde;
 
                     // Advance if it's time.
                     if (timeLeft < 5.0)
@@ -757,24 +819,53 @@ public class RendezMe : Part
                     break;
 
                 case AutoPhaserState.Step4BurnToRendezvous:
-                    predictedVelocity = vessel.orbit.getOrbitalVelocityAt(CalculateTimeTillFurtherTargetApsis());
-                    if(_headingError.magnitude < 5.0)
+
+                    // TODO: Make sure we are only considering the apsis that
+                    // is spatially similar to ours, otherwise we get in sync
+                    // orbitally but go into step 5 super far away.
+                    double timeToRendezvous = 0.0, minDeltaT = 0.0;
+                    CalculateNearestRendezvousInSeconds(out timeToRendezvous, out minDeltaT);
+
+                    if (minDeltaT > 5)
+                        controls.mainThrottle = 0.25f;
+                    else
                     {
-                        controls.mainThrottle = 1;
+                        controls.mainThrottle = 0.0f;
+                        _autoPhaserState = AutoPhaserState.Step5WaitForRendezvous;
+                    }
+                    break;
+
+                case AutoPhaserState.Step5WaitForRendezvous:
+                    timeToRendezvous = 0.0;
+                    minDeltaT = 0.0;
+                    CalculateNearestRendezvousInSeconds(out timeToRendezvous, out minDeltaT);
+
+                    if(timeToRendezvous < 2)
+                        _autoPhaserState = AutoPhaserState.Step6BurnToMatchVelocity;
+
+                    break;
+
+                case AutoPhaserState.Step6BurnToMatchVelocity:
+                    if(_relativeVelocity.magnitude > 5)
+                    {
+                        _flyByWire = true;
+                        PointAt = Orient.RelativeVelocityAway;
+
+                        if(_headingError.magnitude < 5)
+                        {
+                            if (_relativeVelocity.magnitude > 15)
+                                controls.mainThrottle = 1.0f;
+                            else
+                                controls.mainThrottle = 0.2f;
+                        }
+
                     }
                     else
                     {
-                        controls.mainThrottle = 0;
+                        // All done!
+                        controls.mainThrottle = 0.0f;
+                        _autoPhaser = false;
                     }
-
-                    // Advance to next state if we hit our goal.
-                    if (_minimumPredictedTimeFromTarget < 4)
-                        _autoPhaserState = AutoPhaserState.Step5WaitForRendezvous;
-
-                    break;
-                case AutoPhaserState.Step5WaitForRendezvous:
-                    break;
-                case AutoPhaserState.Step6BurnToMatchVelocity:
                     break;
 
             }
@@ -915,6 +1006,9 @@ public class RendezMe : Part
             if (_minimumPredictedTimeFromTarget > Math.Abs(_shipTimeToRendezvous[i] - _targetTimeToRendezvous[i]))
                 _closestApproachOrbit = i;
         }
+
+        double junk;
+        CalculateNearestRendezvousInSeconds(out junk, out _minimumPredictedTimeFromTarget);
 
         // Update the display.
         for (int i = 0; i < 4; i++)
