@@ -107,11 +107,11 @@ public class RendezMe : Part
     #region FlyByWire PID Controller State
     public enum Orient
     {
-        OFF,
-        RVEL,
-        RVELNEG,
-        TGT,
-        TGTNEG,
+        Off,
+        RelativeVelocity,
+        RelativeVelocityAway,
+        Target,
+        TargetAway,
         Normal,
         AntiNormal,
     }
@@ -126,7 +126,7 @@ public class RendezMe : Part
                                            "NML\n+", "NML\n-"
                                        };
 
-    public Orient PointAt = Orient.OFF;
+    public Orient PointAt = Orient.Off;
     private bool _flyByWire;
     private Vector3 _tgtFwd;
     private Vector3 _tgtUp;
@@ -141,13 +141,7 @@ public class RendezMe : Part
     public float Kp = 20.0F;
     public float Ki;
     public float Kd = 40.0F;
-    public float k_Kp = 13.0F;
-    public float k_Ki;
-    public float k_Kd;
-    public float t_Kp = 1.0F;
-    public float t_Ki;
-    public float t_Kd;
-
+   
     #endregion
 
     #region User Interface
@@ -173,7 +167,6 @@ public class RendezMe : Part
         if (Mode == UIMode.ALIGN)
             RenderAlignUI(sty);
 
-        // TODO: RELATIVE INCLINATION
         // TIME TO NODES
         // BURN TIMER?
         // DELTA RINC
@@ -411,7 +404,7 @@ public class RendezMe : Part
             if (GUILayout.Button(ControlModeCaptions[0], sty, GUILayout.ExpandWidth(true)))
             {
                 _flyByWire = true;
-                PointAt = Orient.RVEL;
+                PointAt = Orient.RelativeVelocity;
                 _modeChanged = true;
                 _selectedFlyMode = 0;
             }
@@ -420,7 +413,7 @@ public class RendezMe : Part
             if (GUILayout.Button(ControlModeCaptions[1], sty, GUILayout.ExpandWidth(true)))
             {
                 _flyByWire = true;
-                PointAt = Orient.RVELNEG;
+                PointAt = Orient.RelativeVelocityAway;
                 _modeChanged = true;
                 _selectedFlyMode = 1;
             }
@@ -429,7 +422,7 @@ public class RendezMe : Part
             if (GUILayout.Button(ControlModeCaptions[2], sty, GUILayout.ExpandWidth(true)))
             {
                 _flyByWire = true;
-                PointAt = Orient.TGT;
+                PointAt = Orient.Target;
                 _modeChanged = true;
                 _selectedFlyMode = 2;
             }
@@ -438,7 +431,7 @@ public class RendezMe : Part
             if (GUILayout.Button(ControlModeCaptions[3], sty, GUILayout.ExpandWidth(true)))
             {
                 _flyByWire = true;
-                PointAt = Orient.TGTNEG;
+                PointAt = Orient.TargetAway;
                 _modeChanged = true;
                 _selectedFlyMode = 3;
             }
@@ -535,19 +528,19 @@ public class RendezMe : Part
 
         switch (PointAt)
         {
-            case Orient.RVEL:
+            case Orient.RelativeVelocity:
                 _tgtFwd = relativeVelocity;
                 _tgtUp = Vector3.Cross(_tgtFwd.normalized, vessel.orbit.vel.normalized);
                 break;
-            case Orient.RVELNEG:
+            case Orient.RelativeVelocityAway:
                 _tgtFwd = -relativeVelocity;
                 _tgtUp = Vector3.Cross(_tgtFwd.normalized, vessel.orbit.vel.normalized);
                 break;
-            case Orient.TGT:
+            case Orient.Target:
                 _tgtFwd = _vectorToTarget;
                 _tgtUp = Vector3.Cross(_tgtFwd.normalized, vessel.orbit.vel.normalized);
                 break;
-            case Orient.TGTNEG:
+            case Orient.TargetAway:
                 _tgtFwd = -_vectorToTarget;
                 _tgtUp = Vector3.Cross(_tgtFwd.normalized, vessel.orbit.vel.normalized);
                 break;
@@ -565,25 +558,25 @@ public class RendezMe : Part
 
     private void drive(FlightCtrlState s)
     {
-        if (_flyByWire)
-        {
-            Quaternion tgt = Quaternion.LookRotation(_tgtFwd, _tgtUp);
-            Quaternion delta =
-                Quaternion.Inverse(Quaternion.Euler(90, 0, 0) * Quaternion.Inverse(vessel.transform.rotation) * tgt);
+        if (!_flyByWire) 
+            return;
 
-            _err =
-                new Vector3((delta.eulerAngles.x > 180) ? (delta.eulerAngles.x - 360.0F) : delta.eulerAngles.x,
-                            (delta.eulerAngles.y > 180) ? (delta.eulerAngles.y - 360.0F) : delta.eulerAngles.y,
-                            (delta.eulerAngles.z > 180) ? (delta.eulerAngles.z - 360.0F) : delta.eulerAngles.z) / 180.0F;
-            _integral += _err * TimeWarp.fixedDeltaTime;
-            _deriv = (_err - _prevErr) / TimeWarp.fixedDeltaTime;
-            _act = Kp * _err + Ki * _integral + Kd * _deriv;
-            _prevErr = _err;
+        Quaternion tgt = Quaternion.LookRotation(_tgtFwd, _tgtUp);
+        Quaternion delta =
+            Quaternion.Inverse(Quaternion.Euler(90, 0, 0) * Quaternion.Inverse(vessel.transform.rotation) * tgt);
 
-            s.pitch = Mathf.Clamp(s.pitch + _act.x, -1.0F, 1.0F);
-            s.yaw = Mathf.Clamp(s.yaw - _act.y, -1.0F, 1.0F);
-            s.roll = Mathf.Clamp(s.roll + _act.z, -1.0F, 1.0F);
-        }
+        _err =
+            new Vector3((delta.eulerAngles.x > 180) ? (delta.eulerAngles.x - 360.0F) : delta.eulerAngles.x,
+                        (delta.eulerAngles.y > 180) ? (delta.eulerAngles.y - 360.0F) : delta.eulerAngles.y,
+                        (delta.eulerAngles.z > 180) ? (delta.eulerAngles.z - 360.0F) : delta.eulerAngles.z) / 180.0F;
+        _integral += _err * TimeWarp.fixedDeltaTime;
+        _deriv = (_err - _prevErr) / TimeWarp.fixedDeltaTime;
+        _act = Kp * _err + Ki * _integral + Kd * _deriv;
+        _prevErr = _err;
+
+        s.pitch = Mathf.Clamp(s.pitch + _act.x, -1.0F, 1.0F);
+        s.yaw = Mathf.Clamp(s.yaw - _act.y, -1.0F, 1.0F);
+        s.roll = Mathf.Clamp(s.roll + _act.z, -1.0F, 1.0F);
     }
 
     #endregion
