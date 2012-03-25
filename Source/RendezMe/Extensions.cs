@@ -92,6 +92,7 @@ namespace Extensions
             double inc1 = orbit.inclination;
             double Lan2 = tgtorbit.LAN;
             double inc2 = tgtorbit.inclination;
+
             //see braeunig.us/space... cross product of two orbital planes gives the node location
             var a = new Vector3d(Math.Sin(inc1*rad)*Math.Cos(Lan1*rad), Math.Sin(inc1*rad)*Math.Sin(Lan1*rad),
                                  Math.Cos(inc1*rad));
@@ -103,6 +104,7 @@ namespace Extensions
             coord = LatLonofVector(c); //get the coordinates lat/lon of the ascending node
             double lat = coord[0];
             double lon = coord[1];
+
             //go look at the diagrams at braeunig.us/space
             double α = lon - Lan1; //its all greek to me
             if (α < 0) α += 360;
@@ -113,7 +115,7 @@ namespace Extensions
         }
 
         /// <summary>
-        /// Eta to this orbits ascenting node relative to a second orbit.
+        /// Eta to this orbits ascending node relative to a second orbit.
         /// </summary>
         /// <returns>
         /// The time to ascending node.
@@ -190,7 +192,7 @@ namespace Extensions
         /// <param name='t'>
         /// Time from periapsis
         /// </param>
-        public static double GetMeanatTime(this Orbit orbit, double t)
+        public static double GetMeanAnomalyAtTime(this Orbit orbit, double t)
         {
             double tau = 2*Math.PI;
             double M = 0;
@@ -326,18 +328,6 @@ namespace Extensions
             //double t = this.vessel.orbit.GetTimeToTrue(anomaly);
             return tgt_orb.GetTimeToTrue(tgta) + (p*orbitnum);
         }
-
-        /*
-	public static double findIntersection(this Orbit orbit, Orbit tgt_orbit){
-	double sM1= orbit.semiMajorAxis;
-	double sm1= orbit.semiMinorAxis;
-	double sM2= tgt_orbit.semiMajorAxis;
-	double sm2= tgt_orbit.semiMajorAxis;
-	double eqleft=0;
-	
-	
-	}
-	*/
 
         public static double f(this Orbit orbit, Orbit tgt_orbit, double x)
         {

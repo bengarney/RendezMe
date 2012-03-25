@@ -39,7 +39,7 @@ public class RendezMe : Part
 
     private int _selectedFlyMode;
 
-    private const int windowIDbase = 18420;
+    private const int WindowIDBase = 18420;
 
     /// <summary>
     /// The selected vessel's location in FlightGlobals.Vessels[LIST].
@@ -59,15 +59,13 @@ public class RendezMe : Part
 
     public enum SynchronizationType
     {
-        TARGET_PERIAPSIS,
-        TARGET_APOAPSIS,
-        SHIP_PERIAPSIS,
-        SHIP_APOAPSIS,
-        //INTERSECT1,
-        //INTERSECT2,
+        TargetPeriapsis,
+        TargetApoapsis,
+        ShipPeriapsis,
+        ShipApoapsis,
     }
 
-    public SynchronizationType SyncMode = SynchronizationType.TARGET_PERIAPSIS;
+    public SynchronizationType SyncMode = SynchronizationType.TargetPeriapsis;
     private double _minimumPredictedTimeFromTarget;
     private double _rendezvousAnomaly = 180;
     private readonly float[] _shipTimeToRendezvous = new float[4];
@@ -80,7 +78,6 @@ public class RendezMe : Part
 
     #region Rendezvous State
 
-    private float _relativeVelocityMagnitude;
     private Vector3 _relativeVelocity;
     private float _relativeInclination;
     private Vector3 _vectorToTarget;
@@ -105,12 +102,14 @@ public class RendezMe : Part
         Normal,
         AntiNormal,
         MatchTarget,
-        MatchTargetAway
+        MatchTargetAway,
+        Prograde,
+        Retrograde
     }
 
     public string[] ControlModeCaptions = new[]
                                       {
-                                          "RVel+", "Rvel-", "TGT+", "TGT-", "Match", "Match -"
+                                          "RVel+", "Rvel-", "TGT+", "TGT-", "Match+", "Match-"
                                       };
 
     public string[] AlignmentCaptions = new[]
@@ -127,8 +126,6 @@ public class RendezMe : Part
     private Vector3 _err = Vector3.zero;
     private Vector3 _prevErr = Vector3.zero;
     private Vector3 _act = Vector3.zero;
-    private Vector3 _kIntegral = Vector3.zero;
-    private Vector3 _kPrevErr = Vector3.zero;
     
     public float Kp = 20.0F;
     public float Ki;
@@ -465,7 +462,7 @@ public class RendezMe : Part
             return;
 
         GUI.skin = HighLogic.Skin;
-        WindowPos = GUILayout.Window(windowIDbase, WindowPos, WindowGUI, "RendezMe", GUILayout.MinWidth(100));
+        WindowPos = GUILayout.Window(WindowIDBase, WindowPos, WindowGUI, "RendezMe", GUILayout.MinWidth(200));
     }
 
     #endregion
@@ -516,7 +513,6 @@ public class RendezMe : Part
         Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
 
         _relativeVelocity = selectedVessel.orbit.GetVel() - vessel.orbit.GetVel();
-        _relativeVelocityMagnitude = (float) _relativeVelocity.magnitude;
         _vectorToTarget = selectedVessel.transform.position - vessel.transform.position;
         _targetDistance = Vector3.Distance(selectedVessel.transform.position, vessel.transform.position);
 
@@ -558,7 +554,6 @@ public class RendezMe : Part
                 break;
         }
     }
-
 
     private void DriveShip(FlightCtrlState s)
     {
@@ -670,16 +665,16 @@ public class RendezMe : Part
         // What anomaly are we trying to rendezvous at?
         switch (SyncMode)
         {
-            case SynchronizationType.SHIP_APOAPSIS:
+            case SynchronizationType.ShipApoapsis:
                 _rendezvousAnomaly = 180;
                 break;
-            case SynchronizationType.SHIP_PERIAPSIS:
+            case SynchronizationType.ShipPeriapsis:
                 _rendezvousAnomaly = 0;
                 break;
-            case SynchronizationType.TARGET_APOAPSIS:
+            case SynchronizationType.TargetApoapsis:
                 _rendezvousAnomaly = FlightGlobals.Vessels[_selectedVesselIndex].orbit.TranslateAnomaly(vessel.orbit, 180);
                 break;
-            case SynchronizationType.TARGET_PERIAPSIS:
+            case SynchronizationType.TargetPeriapsis:
                 _rendezvousAnomaly = FlightGlobals.Vessels[_selectedVesselIndex].orbit.TranslateAnomaly(vessel.orbit, 0);
                 break;
         }
