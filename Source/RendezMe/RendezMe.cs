@@ -76,6 +76,13 @@ public class RendezMe : Part
     
     #endregion
 
+    #region Auto Align State
+
+    private bool _autoAlign = false;
+    private bool _autoAlignBurnTriggered = false;
+
+    #endregion
+
     #region Rendezvous State
 
     private Vector3 _relativeVelocity;
@@ -128,7 +135,7 @@ public class RendezMe : Part
     private Vector3 _act = Vector3.zero;
     
     public float Kp = 20.0F;
-    public float Ki;
+    public float Ki = 0.0F;
     public float Kd = 40.0F;
 
     #endregion
@@ -283,6 +290,12 @@ public class RendezMe : Part
                       vessel.orbit.GetTimeToRelDN(FlightGlobals.Vessels[_selectedVesselIndex].orbit).ToString("F2"));
         GUILayout.Box("Relative Inclination :" + _relativeInclination.ToString("F2"));
 
+        if(GUILayout.Button(_autoAlign ? "ALIGNING" : "Auto-Align", sty, GUILayout.ExpandWidth(true)))
+        {
+            _autoAlignBurnTriggered = false;
+            _autoAlign = !_autoAlign;
+        }
+
         if (_flyByWire == false)
         {
             if (GUILayout.Button("Orbit Normal", sty, GUILayout.ExpandWidth(true)))
@@ -356,6 +369,7 @@ public class RendezMe : Part
         }
 
         Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
+
         //the above check should prevent a crash when the vessel we are looking for is destroyed
         //learn how to use list.exists etc...
         if (GUILayout.Button(selectedVessel.vesselName, sty, GUILayout.ExpandWidth(true)))
@@ -516,7 +530,7 @@ public class RendezMe : Part
         _vectorToTarget = selectedVessel.transform.position - vessel.transform.position;
         _targetDistance = Vector3.Distance(selectedVessel.transform.position, vessel.transform.position);
 
-        _relativeInclination = Mathf.Abs((float) selectedVessel.orbit.inclination - (float) vessel.orbit.inclination);
+        _relativeInclination = (float) selectedVessel.orbit.inclination - (float) vessel.orbit.inclination;
 
         switch (PointAt)
         {
@@ -552,18 +566,73 @@ public class RendezMe : Part
                 _tgtFwd = -selectedVessel.transform.up;
                 _tgtUp = selectedVessel.transform.right;
                 break;
+            case Orient.Prograde:
+                _tgtFwd = vessel.rigidbody.velocity.normalized;
+                _tgtUp = new Vector3(0, 0, 1);
+                break;
+            case Orient.Retrograde:
+                _tgtFwd = -vessel.rigidbody.velocity.normalized;
+                _tgtUp = new Vector3(0, 0, 1);
+                break;
         }
     }
 
-    private void DriveShip(FlightCtrlState s)
+    private void DriveShip(FlightCtrlState controls)
     {
+        if(!CheckVessel())
+            return;
+
         Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
+
+        if(_autoAlign)
+        {
+            // Is it time to burn? Find soonest node.
+            double timeToBurnAN = vessel.orbit.GetTimeToRelAN(selectedVessel.orbit);
+            double timeToBurnDN = vessel.orbit.GetTimeToRelDN(selectedVessel.orbit);
+
+            bool ascendingSoonest = timeToBurnAN < timeToBurnDN;
+            double timeToBurnNode = ascendingSoonest ? timeToBurnAN : timeToBurnDN;
+
+            // Figure out which way we want to burn to adjust our inclination.
+            _flyByWire = true;
+            if(!_autoAlignBurnTriggered)
+            {
+                if (_relativeInclination < 0.0)
+                    PointAt = ascendingSoonest ? Orient.Normal : Orient.AntiNormal;
+                else
+                    PointAt = ascendingSoonest ? Orient.AntiNormal : Orient.Normal;                
+            }
+
+            // Do a burn just ahead of the ascending node - in the 5 seconds preceding.
+            if ((timeToBurnNode < 10.0 || _autoAlignBurnTriggered) && _err.magnitude < 5.0 && Math.Abs(_relativeInclination) > 0.01)
+            {
+                _autoAlignBurnTriggered = true;
+                if (Math.Abs(_relativeInclination) > 0.1)
+                {
+                    controls.mainThrottle = 1.0f;                    
+                }
+                else
+                {
+                    controls.mainThrottle = 0.25f;
+                }
+            }
+            else
+            {
+                controls.mainThrottle = 0.0f;
+            }
+
+            if (Math.Abs(_relativeInclination) < 0.02)
+            {
+                _autoAlignBurnTriggered = false;
+                _autoAlign = false;
+            }
+        }
 
         if(_killRelativeVelocity)
         {
-            s.X = Mathf.Clamp(-_localRelativeVelocity.x * 8.0f, -1.0f, 1.0f);
-            s.Y = Mathf.Clamp(-_localRelativeVelocity.z * 8.0f, -1.0f, 1.0f);
-            s.Z = Mathf.Clamp(-_localRelativeVelocity.y * 8.0f, -1.0f, 1.0f);
+            controls.X = Mathf.Clamp(-_localRelativeVelocity.x * 8.0f, -1.0f, 1.0f);
+            controls.Y = Mathf.Clamp(-_localRelativeVelocity.z * 8.0f, -1.0f, 1.0f);
+            controls.Z = Mathf.Clamp(-_localRelativeVelocity.y * 8.0f, -1.0f, 1.0f);
 
             if (_localRelativeVelocity.magnitude < 0.1)
                 _killRelativeVelocity = false;
@@ -597,11 +666,10 @@ public class RendezMe : Part
             if (Mathf.Abs(relPos.z) > 0.01f)
                 goalVel.z = -Mathf.Sign(relPos.z) * velGoal;
 
-            s.X = Mathf.Clamp((goalVel.x - _localRelativeVelocity.x) * 8.0f, -1, 1);
-            s.Y = Mathf.Clamp((goalVel.z - _localRelativeVelocity.z) * 8.0f, -1, 1);
-            s.Z = Mathf.Clamp((goalVel.y - _localRelativeVelocity.y) * 8.0f, -1, 1);
+            controls.X = Mathf.Clamp((goalVel.x - _localRelativeVelocity.x) * 8.0f, -1, 1);
+            controls.Y = Mathf.Clamp((goalVel.z - _localRelativeVelocity.z) * 8.0f, -1, 1);
+            controls.Z = Mathf.Clamp((goalVel.y - _localRelativeVelocity.y) * 8.0f, -1, 1);
         }
-
 
         if (!_flyByWire) 
             return;
@@ -619,9 +687,9 @@ public class RendezMe : Part
         _act = Kp * _err + Ki * _integral + Kd * _deriv;
         _prevErr = _err;
 
-        s.pitch = Mathf.Clamp(s.pitch + _act.x, -1.0F, 1.0F);
-        s.yaw = Mathf.Clamp(s.yaw - _act.y, -1.0F, 1.0F);
-        s.roll = Mathf.Clamp(s.roll + _act.z, -1.0F, 1.0F);
+        controls.pitch = Mathf.Clamp(controls.pitch + _act.x, -1.0F, 1.0F);
+        controls.yaw = Mathf.Clamp(controls.yaw - _act.y, -1.0F, 1.0F);
+        controls.roll = Mathf.Clamp(controls.roll + _act.z, -1.0F, 1.0F);
     }
 
     #endregion
