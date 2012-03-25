@@ -600,33 +600,29 @@ public class RendezMe : Part
             Vector3 relPos = targetGoalPos;
             Vector4 goalVel = Vector3.zero;
 
-            if (relPos.x < 0.1f && _localRelativeVelocity.x < 0.5f)
-                goalVel.x = 1;
+            float velGoal = 0.1f;
 
-            if (relPos.x > -0.1f && _localRelativeVelocity.x > -0.5f)
-                goalVel.x = -1;
+            if (_targetDistance > 2.0f)
+                velGoal = 0.3f;
+            else if (_targetDistance > 10.0f)
+                velGoal = 0.5f;
+            else if (_targetDistance > 50.0f)
+                velGoal = 1.0f;
+            else if (_targetDistance > 150.0f)
+                velGoal = 3.0f;
 
-            if (relPos.y < 0.1f && _localRelativeVelocity.y < 0.5f)
-                goalVel.y = 1;
+            if(Mathf.Abs(relPos.x) > 0.01f)
+                goalVel.x = -Mathf.Sign(relPos.x) * velGoal;
 
-            if (relPos.y > -0.1f && _localRelativeVelocity.y > -0.5f)
-                goalVel.y = -1;
+            if (Mathf.Abs(relPos.y) > 0.01f)
+                goalVel.y = -Mathf.Sign(relPos.y) * velGoal;
 
-            if (relPos.z < 0.1f && _localRelativeVelocity.z < 0.5f)
-                goalVel.z = 1;
+            if (Mathf.Abs(relPos.z) > 0.01f)
+                goalVel.z = -Mathf.Sign(relPos.z) * velGoal;
 
-            if (relPos.z > -0.1f && _localRelativeVelocity.z > -0.5f)
-                goalVel.z = -1;
-
-            s.X = goalVel.x;
-            s.Y = goalVel.z;
-            s.Z = goalVel.y;
-
-            if (relPos.magnitude < 0.2)
-            {
-                _homeOnRelativePosition = false;
-                _killRelativeVelocity = true;
-            }
+            s.X = Mathf.Clamp((goalVel.x - _localRelativeVelocity.x) * 8.0f, -1, 1);
+            s.Y = Mathf.Clamp((goalVel.z - _localRelativeVelocity.z) * 8.0f, -1, 1);
+            s.Z = Mathf.Clamp((goalVel.y - _localRelativeVelocity.y) * 8.0f, -1, 1);
         }
 
 
