@@ -83,6 +83,35 @@ public class RendezMe : Part
 
     #endregion
 
+
+    #region Orbit Phaser State
+
+    private bool _autoPhaser = false;
+
+    private enum AutoPhaserState
+    {
+        // To auto sync:
+        // (I believe apo/peri can be swapped through this.)
+        // 1. Wait till we hit apoapsis of target.
+        Step1WaitForTargetApsis,
+        // 2. Burn to match periapsis of target.
+        Step2BurnToMatchNextApsis,
+        // 3. Wait till we hit periapsis.
+        Step3WaitForTargetApsis,
+        // 4. Accelerate until one of next N orbits has a rendezvous time match.
+        Step4BurnToRendezvous,
+        // 5. Wait till we hit that time.
+        Step5WaitForRendezvous,
+        // 6. Match orbital velocity with target.
+        Step6BurnToMatchVelocity
+    };
+
+    private AutoPhaserState _autoPhaserState;
+    private double _autoPhaserVelocityGoal;
+
+    private bool _autoPhaseBurnComplete = false;
+    #endregion
+
     #region Rendezvous State
 
     private Vector3 _relativeVelocity;
@@ -130,7 +159,7 @@ public class RendezMe : Part
     private Vector3 _tgtUp;
     private Vector3 _deriv = Vector3.zero;
     private Vector3 _integral = Vector3.zero;
-    private Vector3 _err = Vector3.zero;
+    private Vector3 _headingError = Vector3.zero;
     private Vector3 _prevErr = Vector3.zero;
     private Vector3 _act = Vector3.zero;
     
@@ -335,7 +364,9 @@ public class RendezMe : Part
             Mode = UIMode.SELECTED;
             _flyByWire = false;
         }
+
         GUILayout.EndVertical();
+        
         GUILayout.BeginHorizontal();
         for (int i = 0; i < NumberOfPredictedSyncPoints; i++)
         {
@@ -358,6 +389,12 @@ public class RendezMe : Part
 
         GUILayout.Box("Closest Approach on Orbit " + _closestApproachOrbit.ToString());
         GUILayout.Box("Min Separation (sec) : " + _minimumPredictedTimeFromTarget.ToString("f1"));
+
+        if(GUILayout.Button(_autoPhaser ? _autoPhaserState.ToString() : "Auto Sync", sty, GUILayout.ExpandWidth(true)))
+        {
+            _autoPhaser = !_autoPhaser;
+            _autoPhaserState = AutoPhaserState.Step1WaitForTargetApsis;
+        }
     }
 
     private void RenderRendezvousUI(GUIStyle sty)
@@ -577,6 +614,32 @@ public class RendezMe : Part
         }
     }
 
+    private double CalculateTimeTillNextTargetApsis()
+    {
+        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
+
+        double targetApoapsisAnomaly = selectedVessel.orbit.TranslateAnomaly(vessel.orbit, 180);
+        double targetPeriapsisAnomaly = selectedVessel.orbit.TranslateAnomaly(vessel.orbit, 0);
+
+        double shipTimeToTargetApoapsis = vessel.orbit.GetTimeToTrue(targetApoapsisAnomaly);
+        double shipTimeToTargetPeriapsis = vessel.orbit.GetTimeToTrue(targetPeriapsisAnomaly);
+
+        return Math.Min(shipTimeToTargetApoapsis, shipTimeToTargetPeriapsis);
+    }
+
+    private double CalculateTimeTillFurtherTargetApsis()
+    {
+        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
+
+        double targetApoapsisAnomaly = selectedVessel.orbit.TranslateAnomaly(vessel.orbit, 180);
+        double targetPeriapsisAnomaly = selectedVessel.orbit.TranslateAnomaly(vessel.orbit, 0);
+
+        double shipTimeToTargetApoapsis = vessel.orbit.GetTimeToTrue(targetApoapsisAnomaly);
+        double shipTimeToTargetPeriapsis = vessel.orbit.GetTimeToTrue(targetPeriapsisAnomaly);
+
+        return Math.Max(shipTimeToTargetApoapsis, shipTimeToTargetPeriapsis);
+    }
+
     private void DriveShip(FlightCtrlState controls)
     {
         if(!CheckVessel())
@@ -604,7 +667,7 @@ public class RendezMe : Part
             }
 
             // Do a burn just ahead of the ascending node - in the 5 seconds preceding.
-            if ((timeToBurnNode < 10.0 || _autoAlignBurnTriggered) && _err.magnitude < 5.0 && Math.Abs(_relativeInclination) > 0.01)
+            if ((timeToBurnNode < 10.0 || _autoAlignBurnTriggered) && _headingError.magnitude < 5.0 && Math.Abs(_relativeInclination) > 0.01)
             {
                 _autoAlignBurnTriggered = true;
                 if (Math.Abs(_relativeInclination) > 0.1)
@@ -625,6 +688,95 @@ public class RendezMe : Part
             {
                 _autoAlignBurnTriggered = false;
                 _autoAlign = false;
+            }
+        }
+
+        if (_autoPhaser)
+        {
+            switch(_autoPhaserState)
+            {
+                case AutoPhaserState.Step1WaitForTargetApsis:
+                    double timeLeft = CalculateTimeTillNextTargetApsis();
+
+                    // Set the PointAt based on who is faster at that point in time.
+                    _flyByWire = true;
+                    if (vessel.orbit.getOrbitalVelocityAt(timeLeft) > selectedVessel.orbit.getOrbitalVelocityAt(timeLeft))
+                        PointAt = Orient.Retrograde;
+                    else
+                        PointAt = Orient.Prograde;
+
+                    // Advance if it's time.
+                    if (timeLeft < 5.0)
+                    {
+                        _autoPhaserState = AutoPhaserState.Step2BurnToMatchNextApsis;
+                        _autoPhaserVelocityGoal = selectedVessel.orbit.getOrbitalVelocityAt(CalculateTimeTillFurtherTargetApsis());
+                        _autoPhaseBurnComplete = false;
+                    }
+                    break;
+
+                case AutoPhaserState.Step2BurnToMatchNextApsis:
+                    double predictedVelocity = vessel.orbit.getOrbitalVelocityAt(CalculateTimeTillFurtherTargetApsis());
+                    if (_headingError.magnitude < 5.0 && !_autoPhaseBurnComplete)
+                    {
+                        controls.mainThrottle = 1;
+                    }
+                    else
+                    {
+                        controls.mainThrottle = 0;
+                    }
+
+                    // Advance to next state if we hit our goal.
+                    if (Math.Abs(predictedVelocity - _autoPhaserVelocityGoal) < 10)
+                    {
+                        _autoPhaseBurnComplete = true;
+                        controls.mainThrottle = 0;
+
+                    }
+
+                    // Wait till we pass the apsis so we don't double advance.
+                    if (_autoPhaseBurnComplete && CalculateTimeTillNextTargetApsis() > 10.0)
+                        _autoPhaserState = AutoPhaserState.Step3WaitForTargetApsis;
+                    break;
+
+                case AutoPhaserState.Step3WaitForTargetApsis:
+                    timeLeft = CalculateTimeTillNextTargetApsis();
+
+                    // Set the PointAt based on who is faster at that point in time.
+                    _flyByWire = true;
+                    if (vessel.orbit.getOrbitalVelocityAt(timeLeft) > selectedVessel.orbit.getOrbitalVelocityAt(timeLeft))
+                        PointAt = Orient.Retrograde;
+                    else
+                        PointAt = Orient.Prograde;
+
+                    // Advance if it's time.
+                    if (timeLeft < 5.0)
+                    {
+                        _autoPhaserState = AutoPhaserState.Step4BurnToRendezvous;
+                    }
+
+                    break;
+
+                case AutoPhaserState.Step4BurnToRendezvous:
+                    predictedVelocity = vessel.orbit.getOrbitalVelocityAt(CalculateTimeTillFurtherTargetApsis());
+                    if(_headingError.magnitude < 5.0)
+                    {
+                        controls.mainThrottle = 1;
+                    }
+                    else
+                    {
+                        controls.mainThrottle = 0;
+                    }
+
+                    // Advance to next state if we hit our goal.
+                    if (_minimumPredictedTimeFromTarget < 4)
+                        _autoPhaserState = AutoPhaserState.Step5WaitForRendezvous;
+
+                    break;
+                case AutoPhaserState.Step5WaitForRendezvous:
+                    break;
+                case AutoPhaserState.Step6BurnToMatchVelocity:
+                    break;
+
             }
         }
 
@@ -678,14 +830,14 @@ public class RendezMe : Part
         Quaternion delta =
             Quaternion.Inverse(Quaternion.Euler(90, 0, 0) * Quaternion.Inverse(vessel.transform.rotation) * tgt);
 
-        _err =
+        _headingError =
             new Vector3((delta.eulerAngles.x > 180) ? (delta.eulerAngles.x - 360.0F) : delta.eulerAngles.x,
                         (delta.eulerAngles.y > 180) ? (delta.eulerAngles.y - 360.0F) : delta.eulerAngles.y,
                         (delta.eulerAngles.z > 180) ? (delta.eulerAngles.z - 360.0F) : delta.eulerAngles.z) / 180.0F;
-        _integral += _err * TimeWarp.fixedDeltaTime;
-        _deriv = (_err - _prevErr) / TimeWarp.fixedDeltaTime;
-        _act = Kp * _err + Ki * _integral + Kd * _deriv;
-        _prevErr = _err;
+        _integral += _headingError * TimeWarp.fixedDeltaTime;
+        _deriv = (_headingError - _prevErr) / TimeWarp.fixedDeltaTime;
+        _act = Kp * _headingError + Ki * _integral + Kd * _deriv;
+        _prevErr = _headingError;
 
         controls.pitch = Mathf.Clamp(controls.pitch + _act.x, -1.0F, 1.0F);
         controls.yaw = Mathf.Clamp(controls.yaw - _act.y, -1.0F, 1.0F);
