@@ -95,7 +95,7 @@ public class RendezMe : Part
     #region Rendezvous State
 
     private float _relativeVelocityMagnitude;
-    private float _relativeVelocity;
+    private Vector3 _relativeVelocity;
     private float _relativeInclination;
     private Vector3 _vectorToTarget;
     private float _targetDistance;
@@ -114,6 +114,7 @@ public class RendezMe : Part
         TargetAway,
         Normal,
         AntiNormal,
+        MatchTarget
     }
 
     public string[] ControlModeCaptions = new[]
@@ -141,7 +142,7 @@ public class RendezMe : Part
     public float Kp = 20.0F;
     public float Ki;
     public float Kd = 40.0F;
-   
+
     #endregion
 
     #region User Interface
@@ -154,7 +155,9 @@ public class RendezMe : Part
         sty.hover.textColor = sty.active.textColor = Color.yellow;
         sty.onNormal.textColor = sty.onFocused.textColor = sty.onHover.textColor = sty.onActive.textColor = Color.green;
         sty.padding = new RectOffset(8, 8, 8, 8);
-        
+
+        GUILayout.BeginVertical();
+
         if (Mode == UIMode.OFF)
             RenderOffUI(sty);
 
@@ -179,6 +182,8 @@ public class RendezMe : Part
         if (Mode == UIMode.RENDEZVOUS)
             RenderRendezvousUI(sty);
 
+        GUILayout.EndVertical();
+
         //DragWindow makes the window draggable. The Rect specifies which part of the window it can by dragged by, and is 
         //clipped to the actual boundary of the window. You can also pass no argument at all and then the window can by
         //dragged by any part of it. Make sure the DragWindow command is AFTER all your other GUI input stuff, or else
@@ -188,17 +193,14 @@ public class RendezMe : Part
 
     private void RenderOffUI(GUIStyle sty)
     {
-        GUILayout.BeginVertical();
         if (GUILayout.Button("OPEN", sty, GUILayout.ExpandWidth(true)))
         {
             Mode = UIMode.VESSELS;
         }
-        GUILayout.EndVertical();
     }
 
     private void RenderVesselsUI(GUIStyle sty)
     {
-        GUILayout.BeginVertical();
         if (GUILayout.Button("HIDE", sty, GUILayout.ExpandWidth(true)))
         {
             Mode = UIMode.OFF;
@@ -243,7 +245,6 @@ public class RendezMe : Part
         }
 
         GUILayout.EndScrollView();
-        GUILayout.EndVertical();
     }
 
     private void RenderSelectedUI(GUIStyle sty)
@@ -253,7 +254,7 @@ public class RendezMe : Part
             _flyByWire = false;
             Mode = UIMode.SELECTED;
         }
-        GUILayout.BeginVertical();
+
         if (GUILayout.Button((FlightGlobals.Vessels[_selectedVesselIndex].vesselName), sty, GUILayout.ExpandWidth(true)))
         {
             _flyByWire = false;
@@ -271,7 +272,7 @@ public class RendezMe : Part
         {
             Mode = UIMode.RENDEZVOUS;
         }
-        GUILayout.EndVertical();
+
     }
 
     private void RenderAlignUI(GUIStyle sty)
@@ -281,7 +282,7 @@ public class RendezMe : Part
             _flyByWire = false;
             Mode = UIMode.SELECTED;
         }
-        GUILayout.BeginVertical();
+
         if (GUILayout.Button("Align Planes", sty, GUILayout.ExpandWidth(true)))
         {
             Mode = UIMode.SELECTED;
@@ -318,8 +319,6 @@ public class RendezMe : Part
                 _modeChanged = true;
             }
         }
-
-        GUILayout.EndVertical();
     }
 
     private void RenderSyncUI(GUIStyle sty)
@@ -330,8 +329,6 @@ public class RendezMe : Part
             Mode = UIMode.SELECTED;
         }
 
-        GUILayout.BeginVertical();
-        
         if (GUILayout.Button("Sync Orbits", sty, GUILayout.ExpandWidth(true)))
         {
             Mode = UIMode.SELECTED;
@@ -341,15 +338,15 @@ public class RendezMe : Part
         GUILayout.BeginHorizontal();
         for (int i = 0; i < NumberOfPredictedSyncPoints; i++)
         {
-            if (i == (int) SyncMode)
+            if (i != (int) SyncMode) 
+                continue;
+
+            if (GUILayout.Button(" ", sty, GUILayout.ExpandWidth(true)))
             {
-                if (GUILayout.Button(" ", sty, GUILayout.ExpandWidth(true)))
-                {
-                    if (i == NumberOfPredictedSyncPoints - 1) SyncMode = 0;
-                    else SyncMode = SyncMode + 1;
-                }
-                GUILayout.Box(SyncMode.ToString());
+                if (i == NumberOfPredictedSyncPoints - 1) SyncMode = 0;
+                else SyncMode = SyncMode + 1;
             }
+            GUILayout.Box(SyncMode.ToString());
         }
         GUILayout.EndHorizontal();
         GUILayout.BeginVertical();
@@ -359,23 +356,7 @@ public class RendezMe : Part
             GUILayout.Box(_syncString[i]);
 
         GUILayout.Box("Closest Approach on Orbit " + _closestApproachOrbit.ToString());
-        GUILayout.Box("DToR : " + _minimumPredictedTimeFromTarget.ToString("f1"));
-
-
-        GUILayout.EndVertical();
-
-
-        // TODO: 
-        // SELECT RENDESVOUS POINT
-        // SHIP APO
-        // SHIP PER
-        // TGT APO
-        // TGT PER
-        // INTERSECT 1
-        // INTERSECT 2
-        // MANUAL
-        // DISPLAY ARRIVAL TIME (BY ORBIT)
-        // DELTA ARRIVAL TIME
+        GUILayout.Box("Min Separation (sec) : " + _minimumPredictedTimeFromTarget.ToString("f1"));
     }
 
     private void RenderRendezvousUI(GUIStyle sty)
@@ -388,16 +369,23 @@ public class RendezMe : Part
 
         //the above check should prevent a crash when the vessel we are looking for is destroyed
         //learn how to use list.exists etc...
-
-        GUILayout.BeginVertical();
         if (GUILayout.Button((FlightGlobals.Vessels[_selectedVesselIndex].vesselName), sty, GUILayout.ExpandWidth(true)))
         {
             _flyByWire = false;
             Mode = UIMode.SELECTED;
         }
+
         GUILayout.Box("Distance: " + _targetDistance.ToString("F1"));
         GUILayout.Box("Rel Inc : " + _relativeInclination.ToString("F3"));
-        GUILayout.Box("Rel Vel : " + _relativeVelocity.ToString("F2"));
+        GUILayout.Box("Rel Vel : " + _relativeVelocity.magnitude.ToString("F2"));
+
+
+        // Take the relative velocity and project into ship local space.
+        var localVelocity = vessel.transform.worldToLocalMatrix.MultiplyVector(_relativeVelocity);
+
+        GUILayout.Box("Rel Vel X : " + localVelocity.x.ToString("F2"));
+        GUILayout.Box("Rel Vel Y : " + localVelocity.y.ToString("F2"));
+        GUILayout.Box("Rel Vel Z : " + localVelocity.z.ToString("F2"));
 
         if (_flyByWire == false)
         {
@@ -446,9 +434,6 @@ public class RendezMe : Part
                 _modeChanged = true;
             }
         }
-
-
-        GUILayout.EndVertical();
     }
 
     /// <summary>
@@ -512,16 +497,11 @@ public class RendezMe : Part
         Vector3 prograde = vessel.orbit.GetRelativeVel().normalized;
 
         Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex];
-        Vector3 relativeVelocity = selectedVessel.orbit.GetVel() - vessel.orbit.GetVel();
 
-        _relativeVelocityMagnitude = (float) relativeVelocity.magnitude;
+        _relativeVelocity = selectedVessel.orbit.GetVel() - vessel.orbit.GetVel();
+        _relativeVelocityMagnitude = (float) _relativeVelocity.magnitude;
         _vectorToTarget = selectedVessel.transform.position - vessel.transform.position;
         _targetDistance = Vector3.Distance(selectedVessel.transform.position, vessel.transform.position);
-
-        if (_targetDistance < _prevTargetDistance)
-        {
-            _relativeVelocity = -_relativeVelocityMagnitude;
-        }
         _prevTargetDistance = _targetDistance;
 
         _relativeInclination = Mathf.Abs((float) selectedVessel.orbit.inclination - (float) vessel.orbit.inclination);
@@ -529,11 +509,11 @@ public class RendezMe : Part
         switch (PointAt)
         {
             case Orient.RelativeVelocity:
-                _tgtFwd = relativeVelocity;
+                _tgtFwd = _relativeVelocity;
                 _tgtUp = Vector3.Cross(_tgtFwd.normalized, vessel.orbit.vel.normalized);
                 break;
             case Orient.RelativeVelocityAway:
-                _tgtFwd = -relativeVelocity;
+                _tgtFwd = -_relativeVelocity;
                 _tgtUp = Vector3.Cross(_tgtFwd.normalized, vessel.orbit.vel.normalized);
                 break;
             case Orient.Target:
