@@ -1,0 +1,23 @@
+Simple KSP 0.14.1 compatible Rendezvous Autopilot
+
+Enhanced version of RinComp 0.4 (see http://kerbalspaceprogram.com/forum/index.php?topic=8524.0)
+
+To use:
+
+0. Build a spaceship with the RendezMe part.
+
+1. Get into a circular orbit with radius equal to target's periapsis. (I recommend http://kerbalspaceprogram.com/forum/index.php?topic=8449.0 for this purpose)
+
+2. Click OPEN on RendezMe, and choose your target spaceship (they are sorted by distance, closest first)
+
+3. Choose Align Planes. When you reach the ascending or descending node, you can use the Orbit Normal or Anti Normal buttons to point your ship in in the right direction relative to the orbit to change inclination. Fire your engine until relative inclination is zero or nearly so. Click "Align Planes" at the top when you're done to get back to the main menu.
+
+4. Choose Sync Orbits. Click the blank button to the bottom left of "Sync Orbits" to toggle where the rendezvous (R) is - toggle it to target periapsis. The chart shows how long until the Ship (you) and the Target (whatever you chose in step 2) reach R for the next couple of orbits. Wait until you're at the target's periapsis, then adjust your apoapsis by firing prograde/retrograde until the counters on one of the rows match up.
+
+5. Fast forward till you reach the point of simultaneous R (ie top row's counters reach zero at nearly the samet ime). At this point you should be very close to the target ship! Click Sync Orbits to get back to the main menu.
+
+6. Click Rendezvous. You'll see a bunch of information - the distance between you and the target, your orbital relative inclination (should be zero or nearly so), and "Rel VelM" which is the relative velocity. Use your main engine to fire prograde/retrograde until this as low as you can get it.
+
+7. The bottom two rows reading "Rel Vel" and "Rel Pos" show your velocity and position relative to target. The bottom two rows let you set your ship's direction in a few different useful orientations. RVel + and - are towards or away from the relative velocity vector - fire your main engine in one of those to match gross velocity. TGT+ and TGT- point towards and away from the target ship - if you're a couple of kilometers you can use them and the main engine to get closer. Finally, Match+ and Match- make you point the same way or the opposite direction of the target ship. This is useful if you want to dock nose to nose!
+
+8. At this point you should be within a few m/s of zero relative velocity and with maybe 100m of the target ship. Let's explain the last two buttons. Kill Rel Vel fires your RCS to match speed with the target ship. Click and it'll kill your velocity. "Home on Y+5m" uses RCS to navigate to a point a few meters above the nose of the target ship. Click to turn it on, and your ship will station keep at that position; click again to turn it off.
