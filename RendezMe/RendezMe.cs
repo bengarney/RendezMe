@@ -3,6 +3,20 @@ using System.Collections.Generic;
 using Extensions;
 using UnityEngine;
 
+public class VesselDistanceComparer : IComparer<Vessel>
+{
+    public Vessel OriginVessel;
+
+    public int Compare(Vessel a, Vessel b)
+    {
+        float aDist = Vector3.Distance(a.transform.position, OriginVessel.transform.position);
+        float bDist = Vector3.Distance(b.transform.position, OriginVessel.transform.position);
+
+        return aDist.CompareTo(bDist);
+    }
+    
+}
+
 public class RendezMe : Part
 {
     public enum Sinc
@@ -485,14 +499,6 @@ public class RendezMe : Part
         GUILayout.EndVertical();
     }
 
-    public int CompareVesselDistance(Vessel a, Vessel b)
-    {
-        float aDist = Vector3.Distance(a.transform.position, vessel.transform.position);
-        float bDist = Vector3.Distance(b.transform.position, vessel.transform.position);
-
-        return aDist > bDist ? 1 : -1;
-    }
-
     private void RenderVesselsUI(GUIStyle sty)
     {
         GUILayout.BeginVertical();
@@ -509,7 +515,10 @@ public class RendezMe : Part
 
         // Generate and sort an array of vessels by distance.
         List<Vessel> vesselList = new List<Vessel>(FlightGlobals.Vessels);
-        vesselList.Sort(CompareVesselDistance);
+        var vdc = new VesselDistanceComparer();
+        vdc.OriginVessel = vessel;
+
+        vesselList.Sort(vdc);
 
         for (int i = 0; i < vesselList.Count; i++)
         {
