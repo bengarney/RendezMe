@@ -19,17 +19,11 @@ public class VesselDistanceComparer : IComparer<Vessel>
 
 public class RendezMe : Part
 {
-    public enum Sinc
-    {
-        TGT_PER,
-        TGT_APO,
-        SHP_PER,
-        SHP_APO,
-        //INTERSECT1,
-        //INTERSECT2,
-    }
+    #region UI State
 
-    private const int SincCount = 4;
+    protected Rect WindowPos;
+
+    private Vector2 _scrollPosition = new Vector2(0, 0);
 
     public enum UIMode
     {
@@ -40,72 +34,26 @@ public class RendezMe : Part
         ALIGN,
         SYNC,
     }
-
-    public enum Orient
-    {
-        OFF,
-        RVEL,
-        RVELNEG,
-        TGT,
-        TGTNEG,
-        Normal,
-        AntiNormal,
-    }
-
-    public string[] RendStrings = new[]
-                                      {
-                                          "RVel+", "Rvel-", "TGT+", "TGT-"
-                                      };
-
-    public string[] AlignStrings = new[]
-                                       {
-                                           "NML\n+", "NML\n-"
-                                       };
-
-    public bool Debug;
-
-    public Orbit Target = new Orbit();
-    public Orient TestTarget = Orient.OFF;
-    public Orient PointAt = Orient.OFF;
-    public Sinc SyncMode = Sinc.TGT_PER;
-
-    #region UI State
-
-    protected Rect windowPos;
-
-    public int GridSelect;
-    public bool ModeChanged;
-
-    private Vector2 _scrollPosition = new Vector2(0, 0);
+    
     private UIMode _mode = UIMode.OFF;
-
-    private int _selstring;
-
-    #endregion
-
-    #region Sync State
-    private double _min; // used in sync
-    private double _ran = 180; // used in sync
-    private readonly float[] _shTor = new float[4]; // used in sync
-    private readonly float[] _tgTor = new float[4]; // used in sync
-    private readonly string[] _syncString = new string[4];
-    private int _closestApproachOrbit; // used in sync
-    #endregion
-
-    private double _timeCounter;
+    private bool _modeChanged;
 
     public UIMode Mode
     {
         get { return _mode; }
         set
         {
-            if (_mode == value) 
+            if (_mode == value)
                 return;
 
             _mode = value;
-            ModeChanged = true;
+            _modeChanged = true;
         }
     }
+
+    private int _selectedFlyMode;
+
+    private const int windowIDbase = 18420;
 
     /// <summary>
     /// The selected vessel's location in FlightGlobals.Vessels[LIST].
@@ -117,19 +65,71 @@ public class RendezMe : Part
     /// </summary>
     private int _selectedVesselInstanceId;
 
+    #endregion
+
+    #region Sync State
+
+    private const int NumberOfPredictedSyncPoints = 4;
+
+    public enum SynchronizationType
+    {
+        TARGET_PERIAPSIS,
+        TARGET_APOAPSIS,
+        SHIP_PERIAPSIS,
+        SHIP_APOAPSIS,
+        //INTERSECT1,
+        //INTERSECT2,
+    }
+
+    public SynchronizationType SyncMode = SynchronizationType.TARGET_PERIAPSIS;
+    private double _minimumPredictedTimeFromTarget;
+    private double _rendezvousAnomaly = 180;
+    private readonly float[] _shipTimeToRendezvous = new float[4];
+    private readonly float[] _targetTimeToRendezvous = new float[4];
+    private readonly string[] _syncString = new string[4];
+    private int _closestApproachOrbit;
+    private double _rendezvousRecalculationTimer;
+    
+    #endregion
+
+    #region Rendezvous State
+
     private float _relativeVelocityMagnitude;
     private float _relativeVelocity;
-    //	private float prev_rvel;
     private float _relativeInclination;
     private Vector3 _vectorToTarget;
     private float _targetDistance;
     private float _prevTargetDistance;
-    //private int thisVessel;
-    private const int windowIDbase = 18420;
-    // SAS
+
+    #endregion
+
+
+    #region FlyByWire PID Controller State
+    public enum Orient
+    {
+        OFF,
+        RVEL,
+        RVELNEG,
+        TGT,
+        TGTNEG,
+        Normal,
+        AntiNormal,
+    }
+
+    public string[] ControlModeCaptions = new[]
+                                      {
+                                          "RVel+", "Rvel-", "TGT+", "TGT-"
+                                      };
+
+    public string[] AlignmentCaptions = new[]
+                                       {
+                                           "NML\n+", "NML\n-"
+                                       };
+
+    public Orient PointAt = Orient.OFF;
+    private bool _flyByWire;
     private Vector3 _tgtFwd;
     private Vector3 _tgtUp;
-    private bool _flyByWire;
     private Vector3 _deriv = Vector3.zero;
     private Vector3 _integral = Vector3.zero;
     private Vector3 _err = Vector3.zero;
@@ -137,9 +137,6 @@ public class RendezMe : Part
     private Vector3 _act = Vector3.zero;
     private Vector3 _kIntegral = Vector3.zero;
     private Vector3 _kPrevErr = Vector3.zero;
-    
-    //  private double t_integral = 0;
-    //  private double t_prev_err = 0;
     
     public float Kp = 20.0F;
     public float Ki;
@@ -150,92 +147,10 @@ public class RendezMe : Part
     public float t_Kp = 1.0F;
     public float t_Ki;
     public float t_Kd;
-    public float Damping;
 
-    private void drive(FlightCtrlState s)
-    {
-        if (_flyByWire)
-        {
-            Quaternion tgt = Quaternion.LookRotation(_tgtFwd, _tgtUp);
-            Quaternion delta =
-                Quaternion.Inverse(Quaternion.Euler(90, 0, 0)*Quaternion.Inverse(vessel.transform.rotation)*tgt);
+    #endregion
 
-            _err =
-                new Vector3((delta.eulerAngles.x > 180) ? (delta.eulerAngles.x - 360.0F) : delta.eulerAngles.x,
-                            (delta.eulerAngles.y > 180) ? (delta.eulerAngles.y - 360.0F) : delta.eulerAngles.y,
-                            (delta.eulerAngles.z > 180) ? (delta.eulerAngles.z - 360.0F) : delta.eulerAngles.z)/180.0F;
-            _integral += _err*TimeWarp.fixedDeltaTime;
-            _deriv = (_err - _prevErr)/TimeWarp.fixedDeltaTime;
-            _act = Kp*_err + Ki*_integral + Kd*_deriv;
-            _prevErr = _err;
-
-            s.pitch = Mathf.Clamp(s.pitch + _act.x, -1.0F, 1.0F);
-            s.yaw = Mathf.Clamp(s.yaw - _act.y, -1.0F, 1.0F);
-            s.roll = Mathf.Clamp(s.roll + _act.z, -1.0F, 1.0F);
-        }
-    }
-
-    protected override void onPartUpdate()
-    {
-        _timeCounter += TimeWarp.deltaTime;
-
-        if (Mode == UIMode.SYNC)
-        {
-            switch (SyncMode)
-            {
-                case Sinc.SHP_APO:
-                    _ran = 180;
-                    break;
-                case Sinc.SHP_PER:
-                    _ran = 0;
-                    break;
-                case Sinc.TGT_APO:
-                    _ran = FlightGlobals.Vessels[_selectedVesselIndex].orbit.TranslateAnomaly(vessel.orbit, 180);
-                    break;
-                case Sinc.TGT_PER:
-                    _ran = FlightGlobals.Vessels[_selectedVesselIndex].orbit.TranslateAnomaly(vessel.orbit, 0);
-                    break;
-            }
-
-            if (_timeCounter >= .5)
-            {
-                for (int i = 0; i < 4; i++)
-                {
-                    _shTor[i] = (float) vessel.orbit.GetTimeToTrue(_ran) + (float) vessel.orbit.period*i;
-                    _tgTor[i] = (float) vessel.orbit.Syncorbits(FlightGlobals.Vessels[_selectedVesselIndex].orbit, _ran, i);
-                    
-                    if (i == 0)
-                        _min = Math.Abs(_shTor[i] - _tgTor[i]);
-
-                    if (_min > Math.Abs(_shTor[i] - _tgTor[i]))
-                        _closestApproachOrbit = i;
-                }
-
-                for (int i = 0; i < 4; i++)
-                {
-                    _syncString[i] = i.ToString() + "			" + _shTor[i].ToString("f0") + "			" + _tgTor[i].ToString("f0");
-                }
-                _timeCounter = 0;
-            }
-        }
-
-        UpdateVectors();
-
-        if (ModeChanged)
-        {
-            windowPos.width = windowPos.height = 20;
-            ModeChanged = false;
-        }
-    }
-
-    protected override void onPartStart()
-    {
-        FlightInputHandler.OnFlyByWire += drive;
-        if ((windowPos.x == 0) && (windowPos.y == 0))
-        {
-            windowPos = new Rect(Screen.width - 220, 10, 10, 10);
-        }
-    }
+    #region User Interface
 
     private void WindowGUI(int windowID)
     {
@@ -276,211 +191,6 @@ public class RendezMe : Part
         //dragged by any part of it. Make sure the DragWindow command is AFTER all your other GUI input stuff, or else
         //it may "cover up" your controls and make them stop responding to the mouse.
         GUI.DragWindow(new Rect(0, 0, 10000, 20));
-    }
-
-    private void RenderRendezvousUI(GUIStyle sty)
-    {
-        if (!CheckVessel())
-        {
-            _flyByWire = false;
-            Mode = UIMode.SELECTED;
-        }
-
-        //the above check should prevent a crash when the vessel we are looking for is destroyed
-        //learn how to use list.exists etc...
-
-        GUILayout.BeginVertical();
-        if (GUILayout.Button((FlightGlobals.Vessels[_selectedVesselIndex].vesselName), sty, GUILayout.ExpandWidth(true)))
-        {
-            _flyByWire = false;
-            Mode = UIMode.SELECTED;
-        }
-        GUILayout.Box("Distance: " + _targetDistance.ToString("F1"));
-        GUILayout.Box("Rel Inc : " + _relativeInclination.ToString("F3"));
-        GUILayout.Box("Rel Vel : " + _relativeVelocity.ToString("F2"));
-
-        if (_flyByWire == false)
-        {
-            if (GUILayout.Button(RendStrings[0], sty, GUILayout.ExpandWidth(true)))
-            {
-                _flyByWire = true;
-                PointAt = Orient.RVEL;
-                ModeChanged = true;
-                _selstring = 0;
-            }
-
-
-            if (GUILayout.Button(RendStrings[1], sty, GUILayout.ExpandWidth(true)))
-            {
-                _flyByWire = true;
-                PointAt = Orient.RVELNEG;
-                ModeChanged = true;
-                _selstring = 1;
-            }
-
-
-            if (GUILayout.Button(RendStrings[2], sty, GUILayout.ExpandWidth(true)))
-            {
-                _flyByWire = true;
-                PointAt = Orient.TGT;
-                ModeChanged = true;
-                _selstring = 2;
-            }
-
-
-            if (GUILayout.Button(RendStrings[3], sty, GUILayout.ExpandWidth(true)))
-            {
-                _flyByWire = true;
-                PointAt = Orient.TGTNEG;
-                ModeChanged = true;
-                _selstring = 3;
-            }
-        }
-
-        if (_flyByWire)
-        {
-            if (GUILayout.Button("Disable " + RendStrings[_selstring], sty, GUILayout.ExpandWidth(true)))
-            {
-                FlightInputHandler.SetNeutralControls();
-                _flyByWire = false;
-                ModeChanged = true;
-            }
-        }
-
-
-        GUILayout.EndVertical();
-    }
-
-    private void RenderSyncUI(GUIStyle sty)
-    {
-        if (!CheckVessel())
-        {
-            _flyByWire = false;
-            Mode = UIMode.SELECTED;
-        }
-
-        GUILayout.BeginVertical();
-        
-        if (GUILayout.Button("Sync Orbits", sty, GUILayout.ExpandWidth(true)))
-        {
-            Mode = UIMode.SELECTED;
-            _flyByWire = false;
-        }
-        GUILayout.EndVertical();
-        GUILayout.BeginHorizontal();
-        for (int i = 0; i < SincCount; i++)
-        {
-            if (i == (int) SyncMode)
-            {
-                if (GUILayout.Button(" ", sty, GUILayout.ExpandWidth(true)))
-                {
-                    if (i == SincCount - 1) SyncMode = 0;
-                    else SyncMode = SyncMode + 1;
-                }
-                GUILayout.Box(SyncMode.ToString());
-            }
-        }
-        GUILayout.EndHorizontal();
-        GUILayout.BeginVertical();
-
-        GUILayout.Box("Orbit		ShipToR		TgtToR ", sty, GUILayout.ExpandWidth(true));
-        for (int i = 0; i < 4; i++)
-            GUILayout.Box(_syncString[i]);
-
-        GUILayout.Box("Closest Approach on Orbit " + _closestApproachOrbit.ToString());
-        GUILayout.Box("DToR : " + _min.ToString("f1"));
-
-
-        GUILayout.EndVertical();
-
-
-        // TODO: 
-        // SELECT RENDESVOUS POINT
-        // SHIP APO
-        // SHIP PER
-        // TGT APO
-        // TGT PER
-        // INTERSECT 1
-        // INTERSECT 2
-        // MANUAL
-        // DISPLAY ARRIVAL TIME (BY ORBIT)
-        // DELTA ARRIVAL TIME
-    }
-
-    private void RenderAlignUI(GUIStyle sty)
-    {
-        if (!CheckVessel())
-        {
-            _flyByWire = false;
-            Mode = UIMode.SELECTED;
-        }
-        GUILayout.BeginVertical();
-        if (GUILayout.Button("Align Planes", sty, GUILayout.ExpandWidth(true)))
-        {
-            Mode = UIMode.SELECTED;
-            _flyByWire = false;
-        }
-
-        GUILayout.Box("Time to AN : " +
-                      vessel.orbit.GetTimeToRelAN(FlightGlobals.Vessels[_selectedVesselIndex].orbit).ToString("F2"));
-        GUILayout.Box("Time to DN : " +
-                      vessel.orbit.GetTimeToRelDN(FlightGlobals.Vessels[_selectedVesselIndex].orbit).ToString("F2"));
-        GUILayout.Box("Relative Inclination :" + _relativeInclination.ToString("F2"));
-
-        if (_flyByWire == false)
-        {
-            if (GUILayout.Button("Orbit Normal", sty, GUILayout.ExpandWidth(true)))
-            {
-                _flyByWire = true;
-                PointAt = Orient.Normal;
-            }
-
-            if (GUILayout.Button("Anti Normal", sty, GUILayout.ExpandWidth(true)))
-            {
-                _flyByWire = true;
-                PointAt = Orient.AntiNormal;
-            }
-        }
-
-        if (_flyByWire)
-        {
-            if (GUILayout.Button("Disable " + PointAt.ToString(), sty, GUILayout.ExpandWidth(true)))
-            {
-                FlightInputHandler.SetNeutralControls();
-                _flyByWire = false;
-                ModeChanged = true;
-            }
-        }
-
-        GUILayout.EndVertical();
-    }
-
-    private void RenderSelectedUI(GUIStyle sty)
-    {
-        if (!CheckVessel())
-        {
-            _flyByWire = false;
-            Mode = UIMode.SELECTED;
-        }
-        GUILayout.BeginVertical();
-        if (GUILayout.Button((FlightGlobals.Vessels[_selectedVesselIndex].vesselName), sty, GUILayout.ExpandWidth(true)))
-        {
-            _flyByWire = false;
-            Mode = UIMode.VESSELS;
-        }
-        if (GUILayout.Button("Align Planes", sty, GUILayout.ExpandWidth(true)))
-        {
-            Mode = UIMode.ALIGN;
-        }
-        if (GUILayout.Button("Sync Orbits", sty, GUILayout.ExpandWidth(true)))
-        {
-            Mode = UIMode.SYNC;
-        }
-        if (GUILayout.Button("Rendezvous", sty, GUILayout.ExpandWidth(true)))
-        {
-            Mode = UIMode.RENDEZVOUS;
-        }
-        GUILayout.EndVertical();
     }
 
     private void RenderOffUI(GUIStyle sty)
@@ -543,6 +253,227 @@ public class RendezMe : Part
         GUILayout.EndVertical();
     }
 
+    private void RenderSelectedUI(GUIStyle sty)
+    {
+        if (!CheckVessel())
+        {
+            _flyByWire = false;
+            Mode = UIMode.SELECTED;
+        }
+        GUILayout.BeginVertical();
+        if (GUILayout.Button((FlightGlobals.Vessels[_selectedVesselIndex].vesselName), sty, GUILayout.ExpandWidth(true)))
+        {
+            _flyByWire = false;
+            Mode = UIMode.VESSELS;
+        }
+        if (GUILayout.Button("Align Planes", sty, GUILayout.ExpandWidth(true)))
+        {
+            Mode = UIMode.ALIGN;
+        }
+        if (GUILayout.Button("Sync Orbits", sty, GUILayout.ExpandWidth(true)))
+        {
+            Mode = UIMode.SYNC;
+        }
+        if (GUILayout.Button("Rendezvous", sty, GUILayout.ExpandWidth(true)))
+        {
+            Mode = UIMode.RENDEZVOUS;
+        }
+        GUILayout.EndVertical();
+    }
+
+    private void RenderAlignUI(GUIStyle sty)
+    {
+        if (!CheckVessel())
+        {
+            _flyByWire = false;
+            Mode = UIMode.SELECTED;
+        }
+        GUILayout.BeginVertical();
+        if (GUILayout.Button("Align Planes", sty, GUILayout.ExpandWidth(true)))
+        {
+            Mode = UIMode.SELECTED;
+            _flyByWire = false;
+        }
+
+        GUILayout.Box("Time to AN : " +
+                      vessel.orbit.GetTimeToRelAN(FlightGlobals.Vessels[_selectedVesselIndex].orbit).ToString("F2"));
+        GUILayout.Box("Time to DN : " +
+                      vessel.orbit.GetTimeToRelDN(FlightGlobals.Vessels[_selectedVesselIndex].orbit).ToString("F2"));
+        GUILayout.Box("Relative Inclination :" + _relativeInclination.ToString("F2"));
+
+        if (_flyByWire == false)
+        {
+            if (GUILayout.Button("Orbit Normal", sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.Normal;
+            }
+
+            if (GUILayout.Button("Anti Normal", sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.AntiNormal;
+            }
+        }
+
+        if (_flyByWire)
+        {
+            if (GUILayout.Button("Disable " + PointAt.ToString(), sty, GUILayout.ExpandWidth(true)))
+            {
+                FlightInputHandler.SetNeutralControls();
+                _flyByWire = false;
+                _modeChanged = true;
+            }
+        }
+
+        GUILayout.EndVertical();
+    }
+
+    private void RenderSyncUI(GUIStyle sty)
+    {
+        if (!CheckVessel())
+        {
+            _flyByWire = false;
+            Mode = UIMode.SELECTED;
+        }
+
+        GUILayout.BeginVertical();
+        
+        if (GUILayout.Button("Sync Orbits", sty, GUILayout.ExpandWidth(true)))
+        {
+            Mode = UIMode.SELECTED;
+            _flyByWire = false;
+        }
+        GUILayout.EndVertical();
+        GUILayout.BeginHorizontal();
+        for (int i = 0; i < NumberOfPredictedSyncPoints; i++)
+        {
+            if (i == (int) SyncMode)
+            {
+                if (GUILayout.Button(" ", sty, GUILayout.ExpandWidth(true)))
+                {
+                    if (i == NumberOfPredictedSyncPoints - 1) SyncMode = 0;
+                    else SyncMode = SyncMode + 1;
+                }
+                GUILayout.Box(SyncMode.ToString());
+            }
+        }
+        GUILayout.EndHorizontal();
+        GUILayout.BeginVertical();
+
+        GUILayout.Box("Orbit		ShipToR		TgtToR ", sty, GUILayout.ExpandWidth(true));
+        for (int i = 0; i < 4; i++)
+            GUILayout.Box(_syncString[i]);
+
+        GUILayout.Box("Closest Approach on Orbit " + _closestApproachOrbit.ToString());
+        GUILayout.Box("DToR : " + _minimumPredictedTimeFromTarget.ToString("f1"));
+
+
+        GUILayout.EndVertical();
+
+
+        // TODO: 
+        // SELECT RENDESVOUS POINT
+        // SHIP APO
+        // SHIP PER
+        // TGT APO
+        // TGT PER
+        // INTERSECT 1
+        // INTERSECT 2
+        // MANUAL
+        // DISPLAY ARRIVAL TIME (BY ORBIT)
+        // DELTA ARRIVAL TIME
+    }
+
+    private void RenderRendezvousUI(GUIStyle sty)
+    {
+        if (!CheckVessel())
+        {
+            _flyByWire = false;
+            Mode = UIMode.SELECTED;
+        }
+
+        //the above check should prevent a crash when the vessel we are looking for is destroyed
+        //learn how to use list.exists etc...
+
+        GUILayout.BeginVertical();
+        if (GUILayout.Button((FlightGlobals.Vessels[_selectedVesselIndex].vesselName), sty, GUILayout.ExpandWidth(true)))
+        {
+            _flyByWire = false;
+            Mode = UIMode.SELECTED;
+        }
+        GUILayout.Box("Distance: " + _targetDistance.ToString("F1"));
+        GUILayout.Box("Rel Inc : " + _relativeInclination.ToString("F3"));
+        GUILayout.Box("Rel Vel : " + _relativeVelocity.ToString("F2"));
+
+        if (_flyByWire == false)
+        {
+            if (GUILayout.Button(ControlModeCaptions[0], sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.RVEL;
+                _modeChanged = true;
+                _selectedFlyMode = 0;
+            }
+
+
+            if (GUILayout.Button(ControlModeCaptions[1], sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.RVELNEG;
+                _modeChanged = true;
+                _selectedFlyMode = 1;
+            }
+
+
+            if (GUILayout.Button(ControlModeCaptions[2], sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.TGT;
+                _modeChanged = true;
+                _selectedFlyMode = 2;
+            }
+
+
+            if (GUILayout.Button(ControlModeCaptions[3], sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.TGTNEG;
+                _modeChanged = true;
+                _selectedFlyMode = 3;
+            }
+        }
+
+        if (_flyByWire)
+        {
+            if (GUILayout.Button("Disable " + ControlModeCaptions[_selectedFlyMode], sty, GUILayout.ExpandWidth(true)))
+            {
+                FlightInputHandler.SetNeutralControls();
+                _flyByWire = false;
+                _modeChanged = true;
+            }
+        }
+
+
+        GUILayout.EndVertical();
+    }
+
+    /// <summary>
+    /// Draws the GUI.
+    /// </summary>
+    private void DrawGUI()
+    {
+        if (vessel != FlightGlobals.ActiveVessel)
+            return;
+
+        GUI.skin = HighLogic.Skin;
+        WindowPos = GUILayout.Window(windowIDbase, WindowPos, WindowGUI, "RendezMe", GUILayout.MinWidth(100));
+    }
+
+    #endregion
+
+    #region Control Logic
+
     /// <summary>
     /// Checks  if the selected vessel is still where we expect it.
     /// </summary>
@@ -584,24 +515,23 @@ public class RendezMe : Part
     /// </summary>
     private void UpdateVectors()
     {
-        //		Vector3d v3dRvel;
         Vector3 up = (vessel.findWorldCenterOfMass() - vessel.mainBody.position).normalized;
         Vector3 prograde = vessel.orbit.GetRelativeVel().normalized;
 
-        Vector3 relativeVelocity = (Vector3) FlightGlobals.Vessels[_selectedVesselIndex].orbit.GetVel() - (Vector3) vessel.orbit.GetVel();
+        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex];
+        Vector3 relativeVelocity = selectedVessel.orbit.GetVel() - vessel.orbit.GetVel();
 
         _relativeVelocityMagnitude = (float) relativeVelocity.magnitude;
-        _vectorToTarget = FlightGlobals.Vessels[_selectedVesselIndex].transform.position - vessel.transform.position;
-        _targetDistance = Vector3.Distance(FlightGlobals.Vessels[_selectedVesselIndex].transform.position, vessel.transform.position);
+        _vectorToTarget = selectedVessel.transform.position - vessel.transform.position;
+        _targetDistance = Vector3.Distance(selectedVessel.transform.position, vessel.transform.position);
+
         if (_targetDistance < _prevTargetDistance)
         {
             _relativeVelocity = -_relativeVelocityMagnitude;
         }
         _prevTargetDistance = _targetDistance;
 
-        //Vector3d v3dRvelOff;
-        //v3dRvelOff = v3dRvel.normalized - this.vessel.transform.forward.normalized;
-        _relativeInclination = Mathf.Abs((float) FlightGlobals.Vessels[_selectedVesselIndex].orbit.inclination - (float) vessel.orbit.inclination);
+        _relativeInclination = Mathf.Abs((float) selectedVessel.orbit.inclination - (float) vessel.orbit.inclination);
 
         switch (PointAt)
         {
@@ -633,22 +563,36 @@ public class RendezMe : Part
     }
 
 
-    /// <summary>
-    /// Draws the GUI.
-    /// </summary>
-    private void drawGUI()
+    private void drive(FlightCtrlState s)
     {
-        //this.vessel.isActiveVessel
-        if (vessel == FlightGlobals.ActiveVessel)
+        if (_flyByWire)
         {
-            GUI.skin = HighLogic.Skin;
-            windowPos = GUILayout.Window(windowIDbase, windowPos, WindowGUI, "RendezMe", GUILayout.MinWidth(100));
+            Quaternion tgt = Quaternion.LookRotation(_tgtFwd, _tgtUp);
+            Quaternion delta =
+                Quaternion.Inverse(Quaternion.Euler(90, 0, 0) * Quaternion.Inverse(vessel.transform.rotation) * tgt);
+
+            _err =
+                new Vector3((delta.eulerAngles.x > 180) ? (delta.eulerAngles.x - 360.0F) : delta.eulerAngles.x,
+                            (delta.eulerAngles.y > 180) ? (delta.eulerAngles.y - 360.0F) : delta.eulerAngles.y,
+                            (delta.eulerAngles.z > 180) ? (delta.eulerAngles.z - 360.0F) : delta.eulerAngles.z) / 180.0F;
+            _integral += _err * TimeWarp.fixedDeltaTime;
+            _deriv = (_err - _prevErr) / TimeWarp.fixedDeltaTime;
+            _act = Kp * _err + Ki * _integral + Kd * _deriv;
+            _prevErr = _err;
+
+            s.pitch = Mathf.Clamp(s.pitch + _act.x, -1.0F, 1.0F);
+            s.yaw = Mathf.Clamp(s.yaw - _act.y, -1.0F, 1.0F);
+            s.roll = Mathf.Clamp(s.roll + _act.z, -1.0F, 1.0F);
         }
     }
 
+    #endregion
+
+    #region Kerbel Interface
+
     protected override void onFlightStart()
     {
-        RenderingManager.AddToPostDrawQueue(3, drawGUI);
+        RenderingManager.AddToPostDrawQueue(3, DrawGUI);
     }
 
     protected override void onDisconnect()
@@ -659,6 +603,79 @@ public class RendezMe : Part
     protected override void onPartDestroy() //Called when the part is destroyed
     {
         _flyByWire = false;
-        RenderingManager.RemoveFromPostDrawQueue(3, drawGUI);
+        RenderingManager.RemoveFromPostDrawQueue(3, DrawGUI);
     }
+
+    protected override void onPartUpdate()
+    {
+        _rendezvousRecalculationTimer += TimeWarp.deltaTime;
+
+        if (Mode == UIMode.SYNC)
+            PerformSyncPartLogic();
+
+        UpdateVectors();
+
+        if (_modeChanged)
+        {
+            WindowPos.width = WindowPos.height = 20;
+            _modeChanged = false;
+        }
+    }
+
+    private void PerformSyncPartLogic()
+    {
+        // What anomaly are we trying to rendezvous at?
+        switch (SyncMode)
+        {
+            case SynchronizationType.SHIP_APOAPSIS:
+                _rendezvousAnomaly = 180;
+                break;
+            case SynchronizationType.SHIP_PERIAPSIS:
+                _rendezvousAnomaly = 0;
+                break;
+            case SynchronizationType.TARGET_APOAPSIS:
+                _rendezvousAnomaly = FlightGlobals.Vessels[_selectedVesselIndex].orbit.TranslateAnomaly(vessel.orbit, 180);
+                break;
+            case SynchronizationType.TARGET_PERIAPSIS:
+                _rendezvousAnomaly = FlightGlobals.Vessels[_selectedVesselIndex].orbit.TranslateAnomaly(vessel.orbit, 0);
+                break;
+        }
+
+        // Only recalculate if enough time has elapsed.
+        if (_rendezvousRecalculationTimer < .25) 
+            return;
+
+        // Find the time away from the anomaly we'll be at rendezvous.
+        for (int i = 0; i < 4; i++)
+        {
+            _shipTimeToRendezvous[i] = (float) vessel.orbit.GetTimeToTrue(_rendezvousAnomaly) + (float) vessel.orbit.period*i;
+            _targetTimeToRendezvous[i] = (float) vessel.orbit.Syncorbits(FlightGlobals.Vessels[_selectedVesselIndex].orbit, _rendezvousAnomaly, i);
+
+            if (i == 0)
+                _minimumPredictedTimeFromTarget = Math.Abs(_shipTimeToRendezvous[i] - _targetTimeToRendezvous[i]);
+
+            if (_minimumPredictedTimeFromTarget > Math.Abs(_shipTimeToRendezvous[i] - _targetTimeToRendezvous[i]))
+                _closestApproachOrbit = i;
+        }
+
+        // Update the display.
+        for (int i = 0; i < 4; i++)
+        {
+            _syncString[i] = i.ToString() + "			" + _shipTimeToRendezvous[i].ToString("f0") + "			" + _targetTimeToRendezvous[i].ToString("f0");
+        }
+
+        // Reset the timer.
+        _rendezvousRecalculationTimer = 0;
+    }
+
+    protected override void onPartStart()
+    {
+        FlightInputHandler.OnFlyByWire += drive;
+        if ((WindowPos.x == 0) && (WindowPos.y == 0))
+        {
+            WindowPos = new Rect(Screen.width - 220, 10, 10, 10);
+        }
+    }
+
+    #endregion
 }
