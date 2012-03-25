@@ -101,6 +101,12 @@ public class RendezMe : Part
     private float _targetDistance;
     private float _prevTargetDistance;
 
+    private bool _killRelativeVelocity = false;
+    private Vector3 _localRelativeVelocity = Vector3.zero;
+
+    private bool _homeOnRelativePosition = false;
+    private Vector3 _localRelativePosition = Vector3.zero;
+
     #endregion
 
 
@@ -114,12 +120,13 @@ public class RendezMe : Part
         TargetAway,
         Normal,
         AntiNormal,
-        MatchTarget
+        MatchTarget,
+        MatchTargetAway
     }
 
     public string[] ControlModeCaptions = new[]
                                       {
-                                          "RVel+", "Rvel-", "TGT+", "TGT-"
+                                          "RVel+", "Rvel-", "TGT+", "TGT-", "Match", "Match -"
                                       };
 
     public string[] AlignmentCaptions = new[]
@@ -367,28 +374,39 @@ public class RendezMe : Part
             Mode = UIMode.SELECTED;
         }
 
+        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
         //the above check should prevent a crash when the vessel we are looking for is destroyed
         //learn how to use list.exists etc...
-        if (GUILayout.Button((FlightGlobals.Vessels[_selectedVesselIndex].vesselName), sty, GUILayout.ExpandWidth(true)))
+        if (GUILayout.Button(selectedVessel.vesselName, sty, GUILayout.ExpandWidth(true)))
         {
             _flyByWire = false;
             Mode = UIMode.SELECTED;
         }
 
-        GUILayout.Box("Distance: " + _targetDistance.ToString("F1"));
+        GUILayout.Box("Distance: " + _targetDistance.ToString("F1"), GUILayout.Width(300));
         GUILayout.Box("Rel Inc : " + _relativeInclination.ToString("F3"));
-        GUILayout.Box("Rel Vel : " + _relativeVelocity.magnitude.ToString("F2"));
-
+        GUILayout.Box("Rel VelM: " + _relativeVelocity.magnitude.ToString("F2"));
 
         // Take the relative velocity and project into ship local space.
-        var localVelocity = vessel.transform.worldToLocalMatrix.MultiplyVector(_relativeVelocity);
+        _localRelativeVelocity = vessel.transform.worldToLocalMatrix.MultiplyVector(_relativeVelocity);
+        var localTargetPos = vessel.transform.worldToLocalMatrix.MultiplyPoint(selectedVessel.transform.position);
 
-        GUILayout.Box("Rel Vel X : " + localVelocity.x.ToString("F2"));
-        GUILayout.Box("Rel Vel Y : " + localVelocity.y.ToString("F2"));
-        GUILayout.Box("Rel Vel Z : " + localVelocity.z.ToString("F2"));
+        if(GUILayout.RepeatButton(_killRelativeVelocity == false ? "Kill Rel Vel" : "FIRING", sty, GUILayout.ExpandWidth(true)))
+        {
+            Debug.DrawLine(vessel.transform.position, selectedVessel.transform.position, Color.green, 0.2f);
+            _killRelativeVelocity = true;
+        }
+
+        if(_killRelativeVelocity)
+            GUILayout.Box("Firing!");
+
+        GUILayout.Box("Rel Vel : " + _localRelativeVelocity.x.ToString("F2") + ", " + _localRelativeVelocity.y.ToString("F2") + ", " + _localRelativeVelocity.z.ToString("F2"));
+        GUILayout.Box("Rel Pos : " + localTargetPos.x.ToString("F2") + ", " + localTargetPos.y.ToString("F2") + ", " + localTargetPos.z.ToString("F2"));
 
         if (_flyByWire == false)
         {
+            GUILayout.BeginHorizontal();
+
             if (GUILayout.Button(ControlModeCaptions[0], sty, GUILayout.ExpandWidth(true)))
             {
                 _flyByWire = true;
@@ -415,6 +433,8 @@ public class RendezMe : Part
                 _selectedFlyMode = 2;
             }
 
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
 
             if (GUILayout.Button(ControlModeCaptions[3], sty, GUILayout.ExpandWidth(true)))
             {
@@ -423,6 +443,25 @@ public class RendezMe : Part
                 _modeChanged = true;
                 _selectedFlyMode = 3;
             }
+
+            if (GUILayout.Button(ControlModeCaptions[4], sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.MatchTarget;
+                _modeChanged = true;
+                _selectedFlyMode = 4;
+            }
+
+            if (GUILayout.Button(ControlModeCaptions[5], sty, GUILayout.ExpandWidth(true)))
+            {
+                _flyByWire = true;
+                PointAt = Orient.MatchTargetAway;
+                _modeChanged = true;
+                _selectedFlyMode = 5;
+            }
+
+            GUILayout.EndHorizontal();
+
         }
 
         if (_flyByWire)
@@ -496,7 +535,7 @@ public class RendezMe : Part
         Vector3 up = (vessel.findWorldCenterOfMass() - vessel.mainBody.position).normalized;
         Vector3 prograde = vessel.orbit.GetRelativeVel().normalized;
 
-        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex];
+        Vessel selectedVessel = FlightGlobals.Vessels[_selectedVesselIndex] as Vessel;
 
         _relativeVelocity = selectedVessel.orbit.GetVel() - vessel.orbit.GetVel();
         _relativeVelocityMagnitude = (float) _relativeVelocity.magnitude;
@@ -532,12 +571,30 @@ public class RendezMe : Part
                 _tgtFwd = -Vector3.Cross(prograde, up);
                 _tgtUp = up;
                 break;
+            case Orient.MatchTarget:
+                _tgtFwd = selectedVessel.transform.up;
+                _tgtUp = selectedVessel.transform.forward;
+                break;
+            case Orient.MatchTargetAway:
+                _tgtFwd = -selectedVessel.transform.up;
+                _tgtUp = selectedVessel.transform.forward;
+                break;
         }
     }
 
 
-    private void drive(FlightCtrlState s)
+    private void DriveShip(FlightCtrlState s)
     {
+        if(_killRelativeVelocity)
+        {
+            s.X = Mathf.Clamp(-_localRelativeVelocity.x * 8.0f, -1.0f, 1.0f);
+            s.Y = Mathf.Clamp(-_localRelativeVelocity.z * 8.0f, -1.0f, 1.0f);
+            s.Z = Mathf.Clamp(-_localRelativeVelocity.y * 8.0f, -1.0f, 1.0f);
+
+            if (_localRelativeVelocity.magnitude < 0.1)
+                _killRelativeVelocity = false;
+        }
+
         if (!_flyByWire) 
             return;
 
@@ -615,7 +672,7 @@ public class RendezMe : Part
         }
 
         // Only recalculate if enough time has elapsed.
-        if (_rendezvousRecalculationTimer < .25) 
+        if (_rendezvousRecalculationTimer < .1) 
             return;
 
         // Find the time away from the anomaly we'll be at rendezvous.
@@ -643,7 +700,7 @@ public class RendezMe : Part
 
     protected override void onPartStart()
     {
-        FlightInputHandler.OnFlyByWire += drive;
+        FlightInputHandler.OnFlyByWire += DriveShip;
         if ((WindowPos.x == 0) && (WindowPos.y == 0))
         {
             WindowPos = new Rect(Screen.width - 220, 10, 10, 10);
